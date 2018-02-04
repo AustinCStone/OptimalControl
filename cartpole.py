@@ -35,8 +35,6 @@ def dlqr(A, B, Q, R):
     K = np.matrix(scipy.linalg.inv(B.T*X*B+R)*(B.T*X*A))
      
     eigVals, eigVecs = scipy.linalg.eig(A-B*K)
-    import ipdb
-    ipdb.set_trace()
     return K, X, eigVals
 
 class CartPole(Gtk.Window):
@@ -76,7 +74,6 @@ class CartPole(Gtk.Window):
         R = .001
         # compute gain matrix K
         self.K, _, _ = dlqr(self.A, self.B, Q, R)
-        print(self.K)
 
     def init_ui(self):    
 
@@ -179,8 +176,6 @@ class CartPole(Gtk.Window):
         return A, B
 
     def update_pendulum_dynamics(self, u):
-        self.state = np.dot(self.A, self.state) + np.dot(self.B, u)
-        return
         d_p, d_v, d_a, d_av = self.get_d(self.state, u)
 
         self.state[0] += d_p * self.dt
@@ -191,7 +186,9 @@ class CartPole(Gtk.Window):
     def get_control(self):
         if self.use_lqr_control:
             u = np.dot(-self.K, self.state - np.asarray([2., 0, np.pi, 0.]))
-            return u
+            # TODO: 1.0 is not enough force? 1.5 decays to instability? What am
+            # I doing wrong?
+            return u * 1.5
         else:
             raise 0.
 
