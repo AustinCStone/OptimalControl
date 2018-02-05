@@ -1,7 +1,7 @@
 
 import gi
 gi.require_version('Gtk', '3.0') 
-from gi.repository import Gtk, GLib
+from gi.repository import Gtk, GLib, Gdk
 import cairo
 import copy
 import numpy as np
@@ -9,7 +9,9 @@ import scipy.linalg
 
 
 def draw_rect(cr, rect, rgb):
-
+    """
+    Draw a rectangle with cairo. rect is yxhw format
+    """
     cr.set_source_rgb(*rgb)
     pts = [(rect[0], rect[1]), (rect[0] + rect[2], rect[1]), 
            (rect[0] + rect[2], rect[1] + rect[3]), (rect[0], rect[1] + rect[3]),
@@ -38,20 +40,24 @@ def dlqr(A, B, Q, R):
     return K, X, eigVals
 
 class CartPole(Gtk.Window):
+    """
+    Class for rendering and controlling
+    an inverted pendulum on a cart.
+    """
 
-    m = 1.;
+    m = 50.; # mass of the top knob on the pendulum
     M = 5.; # mass of cart
     L = 2.; # length of pendulum
     g = -10.; # accel due to gravity
     d = 1.;
 
     # simulation discretization
-    dt = .01
+    dt = .1
 
     # state of the system - position, velocity, angle, angular velocity
     # initial state is with the pendulum pointing up
-    state = np.asarray([-3., 0., np.pi + .1, 0.])
-
+    state = np.asarray([8., 0., np.pi + .2, 0.])
+    desired_x = 3.
     SPEED = 3
     SCALING = 50
     TIMER_ID = 1
@@ -65,6 +71,17 @@ class CartPole(Gtk.Window):
         if use_lqr_control:
             # liniearize around the up position
             self.setup_lqr(np.asarray([0., 0., np.pi, 0.]))
+
+    def on_button_press(self, w, event):
+        """When a button is pressed, the location gets stored and the canvas
+        gets updated.
+        """
+        print(self.get_size())
+        print("HERE!!!!!!!!!!!", event.x, event.y)
+        print((event.x / self.get_size()[0] - .5) * self.SCALING)
+
+        self.desired_x = -(event.x / self.get_size()[0] - .5) * self.SCALING / 2.5
+        self.darea.queue_draw()
 
     def setup_lqr(self, y):
         self.use_lqr_control = True
@@ -80,8 +97,14 @@ class CartPole(Gtk.Window):
         self.darea = Gtk.DrawingArea()
         self.darea.set_size_request(1000,1000)
         self.darea.connect("draw", self.on_draw)
+        self.darea.connect("button-press-event", self.on_button_press)
+        self.darea.set_events(self.darea.get_events() |
+                               Gdk.EventMask.BUTTON_MOTION_MASK |
+                               Gdk.EventMask.BUTTON1_MOTION_MASK |
+                               Gdk.EventMask.BUTTON2_MOTION_MASK |
+                               Gdk.EventMask.BUTTON3_MOTION_MASK |
+                               Gdk.EventMask.BUTTON_PRESS_MASK)
         self.add(self.darea)
-
         self.set_title("CartPole")
         self.resize(200, 200)
         self.set_position(Gtk.WindowPosition.CENTER)
@@ -117,19 +140,19 @@ class CartPole(Gtk.Window):
             x[ii] += eps
             d_p, d_v, d_a, d_av = self.get_d(x, 0., add_noise=False)
 
-            x_inc[0] = d_p
-            x_inc[1] = d_v
-            x_inc[2] = d_a
-            x_inc[3] = d_av
+            x_inc[0] = d_p + x[0]
+            x_inc[1] = d_v + x[1]
+            x_inc[2] = d_a + x[2]
+            x_inc[3] = d_av + x[3]
 
             x_dec = np.zeros_like(y)
             x = copy.deepcopy(y)
             x[ii] -= eps
             d_p, d_v, d_a, d_av = self.get_d(x, 0., add_noise=False)
-            x_dec[0] = d_p
-            x_dec[1] = d_v
-            x_dec[2] = d_a
-            x_dec[3] = d_av
+            x_dec[0] = d_p + x[0]
+            x_dec[1] = d_v + x[1]
+            x_dec[2] = d_a + x[2]
+            x_dec[3] = d_av + x[3]
             A[:, ii] = (x_inc - x_dec) / (2 * eps)
 
         B = np.zeros((len(y), 1))
@@ -137,41 +160,19 @@ class CartPole(Gtk.Window):
         u = eps
         x_inc = np.zeros_like(y)
         d_p, d_v, d_a, d_av = self.get_d(y, u, add_noise=False)
-        x_inc[0] = d_p
-        x_inc[1] = d_v
-        x_inc[2] = d_a
-        x_inc[3] = d_av
+        x_inc[0] = d_p + y[0]
+        x_inc[1] = d_v + y[1]
+        x_inc[2] = d_a + y[2]
+        x_inc[3] = d_av + y[3]
 
         u = -eps
         x_dec = np.zeros_like(y)
         d_p, d_v, d_a, d_av = self.get_d(y, u, add_noise=False)
-        x_dec[0] = d_p
-        x_dec[1] = d_v
-        x_dec[2] = d_a
-        x_dec[3] = d_av
+        x_dec[0] = d_p + y[0]
+        x_dec[1] = d_v + y[1]
+        x_dec[2] = d_a + y[2]
+        x_dec[3] = d_av + y[3]
         B[:, 0] = (x_inc - x_dec) / (2 * eps)
-        '''
-        A_orig = copy.deepcopy(A)
-        A = np.zeros_like(A)
-        A[0, 1] = 1.;
-        A[1, 1] = -self.d / self.M
-        A[1, 2] = -self.m * self.g / self.M
-        A[2, 3] = 1.
-        A[3, 1] = -1. * self.d / (self.M * self.L)
-        A[3, 2] = -1. * (self.m + self.M) * self.g / (self.M * self.L)
-        print(A)
-        print(A_orig)
-        print(A - A_orig)
-        print("$$$$$$$$$$$$$$$$")
-
-        B_orig = copy.deepcopy(B)
-        B = np.zeros_like(B)
-        B[1, 0] = 1./self.M
-        B[3, 0] = 1. / (self.M * self.L)
-        print(B)
-        print(B_orig)
-        print(B - B_orig)
-        '''
 
         return A, B
 
@@ -185,10 +186,10 @@ class CartPole(Gtk.Window):
 
     def get_control(self):
         if self.use_lqr_control:
-            u = np.dot(-self.K, self.state - np.asarray([2., 0, np.pi, 0.]))
+            u = np.dot(-self.K, self.state - np.asarray([self.desired_x, 0, np.pi, 0.]))
             # TODO: 1.0 is not enough force? 1.5 decays to instability? What am
             # I doing wrong?
-            return u * 1.5
+            return u * 1.0
         else:
             raise 0.
 
@@ -203,7 +204,7 @@ class CartPole(Gtk.Window):
 
         w, h = self.get_size()
 
-        cr.translate(w/2, h/2)
+        cr.translate(w / 2, h / 2)
         cr.rotate(np.pi)
         cr.scale(self.SCALING, self.SCALING)
 
@@ -242,7 +243,6 @@ def main():
     
     app = CartPole()
     Gtk.main()
-        
         
 if __name__ == "__main__":    
     main()
