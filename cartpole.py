@@ -1,6 +1,7 @@
 
 import gi
 gi.require_version('Gtk', '3.0') 
+
 from gi.repository import Gtk, GLib, Gdk
 import cairo
 import copy
@@ -45,18 +46,18 @@ class CartPole(Gtk.Window):
     an inverted pendulum on a cart.
     """
 
-    m = 50.; # mass of the top knob on the pendulum
+    m = 1.; # mass of the top knob on the pendulum
     M = 5.; # mass of cart
     L = 2.; # length of pendulum
     g = -10.; # accel due to gravity
     d = 1.;
 
     # simulation discretization
-    dt = .1
+    dt = .05
 
     # state of the system - position, velocity, angle, angular velocity
     # initial state is with the pendulum pointing up
-    state = np.asarray([8., 0., np.pi + .2, 0.])
+    state = np.asarray([8., 0., np.pi + .4, 0.])
     desired_x = 3.
     SPEED = 3
     SCALING = 50
@@ -74,21 +75,19 @@ class CartPole(Gtk.Window):
 
     def on_button_press(self, w, event):
         """When a button is pressed, the location gets stored and the canvas
-        gets updated.
-        """
-        print(self.get_size())
-        print("HERE!!!!!!!!!!!", event.x, event.y)
-        print((event.x / self.get_size()[0] - .5) * self.SCALING)
+        gets updated. """
 
         self.desired_x = -(event.x / self.get_size()[0] - .5) * self.SCALING / 2.5
         self.darea.queue_draw()
 
     def setup_lqr(self, y):
+        """ Set Q and R values for computing gain with LQR """
+
         self.use_lqr_control = True
         self.A, self.B = self.get_linearized_dynamics(y)
         Q = np.zeros((len(y), len(y)))
         Q[0, 0] = 1.; Q[1, 1] = 1.; Q[2, 2] = 10.; Q[3, 3] = 100.
-        R = .001
+        R = np.asarray([[.001]])
         # compute gain matrix K
         self.K, _, _ = dlqr(self.A, self.B, Q, R)
 
@@ -99,11 +98,11 @@ class CartPole(Gtk.Window):
         self.darea.connect("draw", self.on_draw)
         self.darea.connect("button-press-event", self.on_button_press)
         self.darea.set_events(self.darea.get_events() |
-                               Gdk.EventMask.BUTTON_MOTION_MASK |
-                               Gdk.EventMask.BUTTON1_MOTION_MASK |
-                               Gdk.EventMask.BUTTON2_MOTION_MASK |
-                               Gdk.EventMask.BUTTON3_MOTION_MASK |
-                               Gdk.EventMask.BUTTON_PRESS_MASK)
+                              Gdk.EventMask.BUTTON_MOTION_MASK |
+                              Gdk.EventMask.BUTTON1_MOTION_MASK |
+                              Gdk.EventMask.BUTTON2_MOTION_MASK |
+                              Gdk.EventMask.BUTTON3_MOTION_MASK |
+                              Gdk.EventMask.BUTTON_PRESS_MASK)
         self.add(self.darea)
         self.set_title("CartPole")
         self.resize(200, 200)
@@ -112,10 +111,13 @@ class CartPole(Gtk.Window):
         self.show_all()
 
     def init_vars(self):   
+        """ Tell Glib some stuff """
 
         GLib.timeout_add(self.SPEED, self.on_timer)   
     
     def get_d(self, y, u, add_noise=True):
+        """ Get the true state update according to the
+        physics equations for the cartpole """
 
         M = self.M; m = self.m; L = self.L; g = self.g; d = self.d
         Sy = np.sin(y[2])
@@ -126,12 +128,14 @@ class CartPole(Gtk.Window):
         d_p = y[1]
         d_v = (1./D)*(-m**2.*L**2.*g*Cy*Sy + m*L**2*(m*L*y[3]**2.*Sy - d*y[1])) + m*L*L*(1./D)*u
         d_a = y[3]
-        r = np.random.normal() if add_noise else 0.
+        r = np.random.normal() * 10. if add_noise else 0.
         d_av = (1./D)*((m+M)*m*g*L*Sy - m*L*Cy*(m*L*y[3]**2.*Sy - d*y[1])) - m*L*Cy*(1/D)*u +.01*r
 
         return d_p, d_v, d_a, d_av
 
     def get_linearized_dynamics(self, y):
+        """ Estimate linearized dynamics using finite differences """
+
         eps = .01
         A = np.zeros((len(y), len(y)))
         for ii in range(len(y)):
@@ -177,6 +181,9 @@ class CartPole(Gtk.Window):
         return A, B
 
     def update_pendulum_dynamics(self, u):
+        """ Progress the pendulum forward one timestep,
+        update the self.state """
+
         d_p, d_v, d_a, d_av = self.get_d(self.state, u)
 
         self.state[0] += d_p * self.dt
@@ -187,13 +194,13 @@ class CartPole(Gtk.Window):
     def get_control(self):
         if self.use_lqr_control:
             u = np.dot(-self.K, self.state - np.asarray([self.desired_x, 0, np.pi, 0.]))
-            # TODO: 1.0 is not enough force? 1.5 decays to instability? What am
-            # I doing wrong?
-            return u * 1.0
+            return u
         else:
             raise 0.
 
     def on_timer(self):
+        """ Execute this each timestep """
+
         u = self.get_control()
         self.update_pendulum_dynamics(u)
         self.darea.queue_draw()
@@ -201,6 +208,7 @@ class CartPole(Gtk.Window):
         return True 
 
     def on_draw(self, wid, cr):
+        """ Execute this for each rendered frame """
 
         w, h = self.get_size()
 
@@ -214,10 +222,10 @@ class CartPole(Gtk.Window):
         M = self.M; m = self.m; L = self.L; g = self.g; d = self.d
 
         # kinematics
-        W = 1*np.sqrt(M/5)  # cart width
-        H = .5*np.sqrt(M/5) # cart height
+        W = 1 * np.sqrt(M/5)  # cart width
+        H = .5 * np.sqrt(M/5) # cart height
         wr = .2 # wheel radius
-        mr = .3*np.sqrt(m) # mass radius
+        mr = .3 * np.sqrt(m) # mass radius
 
         # positions
         y = wr/2+H/2 # cart vertical position
